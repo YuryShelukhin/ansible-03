@@ -1,0 +1,18 @@
+# Local .terraform directories and files
+**/.terraform/*
+.terraform*
+
+!.terraformrc
+
+# .tfstate files
+*.tfstate
+*.tfstate.*
+
+
+source/terraform.tfvars
+
+# own secret vars store.
+personal.auto.tfvars
+
+# Игнорировать файл блокировки зависимостей
+.terraform.lock.hcl

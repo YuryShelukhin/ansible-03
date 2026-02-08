@@ -1,0 +1,334 @@
+---
+- name: Prepare all hosts
+  hosts: all
+  become: true
+  tags: ["prepare"]
+  vars:
+    lighthouse_clickhouse_host: "{{ groups['clickhouse_servers'][0] if groups['clickhouse_servers'] is defined else 'clickhouse' }}"
+
+  tasks:
+    - name: Update package cache
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Install required packages
+      ansible.builtin.apt:
+        name:
+          - python3
+          - python3-pip
+          - curl
+          - wget
+          - unzip
+        state: present
+
+    - name: Wait for cloud-init SSH keys
+      ansible.builtin.wait_for:
+        path: /home/ubuntu/.ssh/authorized_keys
+        timeout: 60
+        delay: 5
+
+    - name: Create ansible user
+      ansible.builtin.user:
+        name: ansible
+        shell: /bin/bash
+        createhome: true
+        groups: sudo
+
+    - name: Configure sudo for ansible user
+      ansible.builtin.lineinfile:
+        path: /etc/sudoers.d/ansible
+        line: 'ansible ALL=(ALL) NOPASSWD:ALL'
+        create: true
+        mode: '0440'
+        validate: 'visudo -cf %s'
+
+    - name: Create ansible SSH directory
+      ansible.builtin.file:
+        path: /home/ansible/.ssh
+        state: directory
+        owner: ansible
+        group: ansible
+        mode: '0700'
+
+    - name: Copy SSH keys to ansible user
+      ansible.builtin.copy:
+        src: /home/ubuntu/.ssh/authorized_keys
+        dest: /home/ansible/.ssh/authorized_keys
+        owner: ansible
+        group: ansible
+        mode: '0600'
+        remote_src: true
+
+- name: Install ClickHouse
+  hosts: clickhouse_servers
+  tags: ["clickhouse"]
+  vars:
+    clickhouse_version: 22.3.3.44
+
+  handlers:
+    - name: Start clickhouse service
+      become: true
+      ansible.builtin.service:
+        name: clickhouse-server
+        state: restarted
+
+  tasks:
+    - name: Install ClickHouse
+      block:
+        - name: Add ClickHouse GPG key
+          become: true
+          ansible.builtin.apt_key:
+            url: "https://packages.clickhouse.com/rpm/lts/repodata/repomd.xml.key"
+            state: present
+
+        - name: Add ClickHouse repository
+          become: true
+          ansible.builtin.apt_repository:
+            repo: "deb https://packages.clickhouse.com/deb stable main"
+            state: present
+            update_cache: true
+
+        - name: Install ClickHouse packages
+          become: true
+          ansible.builtin.apt:
+            name:
+              - clickhouse-server
+              - clickhouse-client
+              - clickhouse-common-static
+            state: present
+            update_cache: true
+          notify: Start clickhouse service
+
+        - name: Flush handlers
+          ansible.builtin.meta: flush_handlers
+
+        - name: Create database
+          ansible.builtin.command: "clickhouse-client -q 'create database logs;'"
+          register: create_db
+          failed_when: create_db.rc != 0 and create_db.rc != 82
+          changed_when: create_db.rc == 0
+
+        - name: Configure ClickHouse to listen on all interfaces
+          become: true
+          ansible.builtin.lineinfile:
+            path: /etc/clickhouse-server/config.xml
+            regexp: '<listen_host>::</listen_host>'
+            line: '<listen_host>0.0.0.0</listen_host>'
+            state: present
+
+        - name: Restart ClickHouse after config change
+          become: true
+          ansible.builtin.service:
+            name: clickhouse-server
+            state: restarted
+          changed_when: false
+
+- name: Install and configure Vector
+  hosts: vector_servers
+  tags: ["vector"]
+  vars:
+    vector_version: 0.31.0
+    clickhouse_host: "{{ groups['clickhouse_servers'][0] }}"
+    clickhouse_port: 8123
+
+  handlers:
+    - name: Restart vector service
+      become: true
+      ansible.builtin.shell: |
+        if pgrep -x vector > /dev/null; then
+          pkill vector
+        fi
+        nohup vector --config /etc/vector/vector.yml > /var/log/vector.log 2>&1 &
+      when: not (has_systemd | bool)
+      changed_when: false
+
+  tasks:
+    - name: Download and setup Vector repository script
+      become: true
+      ansible.builtin.get_url:
+        url: "https://setup.vector.dev"
+        dest: /tmp/setup-vector.sh
+        mode: '0755'
+
+    - name: Run Vector repository setup script
+      become: true
+      ansible.builtin.command: bash /tmp/setup-vector.sh
+      args:
+        creates: /etc/apt/sources.list.d/vector.list
+      changed_when: false
+
+    - name: Install Vector package
+      become: true
+      ansible.builtin.apt:
+        name: vector
+        state: present
+        update_cache: true
+        lock_timeout: 300
+      register: vector_install
+      retries: 6
+      delay: 20
+      until: vector_install is not failed
+
+    - name: Create Vector config directory
+      become: true
+      ansible.builtin.file:
+        path: /etc/vector
+        state: directory
+        mode: '0755'
+
+    - name: Deploy Vector configuration template
+      become: true
+      ansible.builtin.template:
+        src: templates/vector.yml.j2
+        dest: /etc/vector/vector.yml
+        mode: '0644'
+      notify: Restart vector service
+
+    - name: Check if systemd is running
+      ansible.builtin.set_fact:
+        has_systemd: "{{ (ansible_facts.service_mgr == 'systemd') | bool }}"
+      changed_when: false
+
+    - name: Reload systemd to detect new service
+      become: true
+      ansible.builtin.systemd:
+        daemon_reload: true
+      when: has_systemd | bool
+      changed_when: false
+
+    - name: Enable and start Vector service (systemd)
+      become: true
+      ansible.builtin.service:
+        name: vector
+        state: started
+        enabled: true
+      when: has_systemd | bool
+
+    - name: Start Vector directly (container mode)
+      become: true
+      ansible.builtin.shell: |
+        nohup vector --config /etc/vector/vector.yml > /var/log/vector.log 2>&1 &
+        echo $!
+      args:
+        creates: /var/run/vector.pid
+      when: not (has_systemd | bool)
+      changed_when: false
+
+- name: Install and configure LightHouse
+  hosts: lighthouse_servers
+  tags: ["lighthouse"]
+  vars:
+    clickhouse_host: "clickhouse-01"
+    clickhouse_port: 8123
+
+  handlers:
+    - name: Restart nginx
+      become: true
+      ansible.builtin.service:
+        name: nginx
+        state: restarted
+
+  tasks:
+    - name: Install nginx
+      become: true
+      ansible.builtin.apt:
+        name: nginx
+        state: present
+        update_cache: true
+        lock_timeout: 300
+      register: nginx_install
+      retries: 6
+      delay: 30
+      until: nginx_install is not failed
+
+    - name: Create LightHouse directory
+      become: true
+      ansible.builtin.file:
+        path: /var/www/lighthouse
+        state: directory
+        mode: '0755'
+
+    - name: Download LightHouse files from GitHub
+      become: true
+      ansible.builtin.get_url:
+        url: "https://raw.githubusercontent.com/VKCOM/lighthouse/master/{{ item }}"
+        dest: "/var/www/lighthouse/{{ item }}"
+        mode: '0644'
+      loop:
+        - index.html
+        - app.js
+        - jquery.js
+
+    - name: Create LightHouse CSS directory
+      become: true
+      ansible.builtin.file:
+        path: /var/www/lighthouse/css
+        state: directory
+        mode: '0755'
+
+    - name: Create LightHouse JS directory
+      become: true
+      ansible.builtin.file:
+        path: /var/www/lighthouse/js
+        state: directory
+        mode: '0755'
+
+    - name: Create LightHouse IMG directory
+      become: true
+      ansible.builtin.file:
+        path: /var/www/lighthouse/img
+        state: directory
+        mode: '0755'
+
+    - name: Download additional LightHouse files
+      become: true
+      ansible.builtin.get_url:
+        url: "https://raw.githubusercontent.com/VKCOM/lighthouse/master/{{ item }}"
+        dest: "/var/www/lighthouse/{{ item }}"
+        mode: '0644'
+      loop:
+        - LICENSE
+        - README.md
+
+    - name: Update LightHouse index.html to use ClickHouse host
+      become: true
+      ansible.builtin.replace:
+        path: /var/www/lighthouse/index.html
+        regexp: 'http://127.0.0.1:8123'
+        replace: "http://{{ hostvars[clickhouse_host]['ansible_host'] | default(groups['clickhouse_servers'][0]) }}:{{ clickhouse_port }}"
+
+    - name: Create nginx site configuration
+      become: true
+      ansible.builtin.template:
+        src: templates/lighthouse.conf.j2
+        dest: /etc/nginx/sites-available/lighthouse
+        mode: '0644'
+      notify: Restart nginx
+
+    - name: Enable LightHouse site
+      become: true
+      ansible.builtin.file:
+        src: /etc/nginx/sites-available/lighthouse
+        dest: /etc/nginx/sites-enabled/lighthouse
+        state: link
+
+    - name: Remove default nginx site
+      become: true
+      ansible.builtin.file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+
+    - name: Create nginx log directory
+      become: true
+      ansible.builtin.file:
+        path: /var/log/nginx/lighthouse
+        state: directory
+        mode: '0755'
+
+    - name: Start and enable nginx
+      become: true
+      ansible.builtin.service:
+        name: nginx
+        state: started
+        enabled: true

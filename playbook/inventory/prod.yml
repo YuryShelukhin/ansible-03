@@ -1,0 +1,50 @@
+---
+all:
+  children:
+    clickhouse_servers:
+      hosts:
+        clickhouse-01:
+          ansible_host: "89.169.148.126"
+          ansible_user: ubuntu
+          ansible_python_interpreter: /usr/bin/python3
+          internal_ip: "10.130.0.3"
+          hostname: clickhouse
+          clickhouse_http_port: 8123
+          clickhouse_native_port: 9000
+
+    vector_servers:
+      hosts:
+        vector-01:
+          ansible_host: "93.77.184.186"
+          ansible_user: ubuntu
+          ansible_python_interpreter: /usr/bin/python3
+          internal_ip: "10.130.0.26"
+          hostname: vector
+          vector_version: "0.31.0"
+
+    lighthouse_servers:
+      hosts:
+        lighthouse-01:
+          ansible_host: "93.77.184.112"
+          ansible_user: ubuntu
+          ansible_python_interpreter: /usr/bin/python3
+          internal_ip: "10.130.0.4"
+          hostname: lighthouse
+          web_port: 80
+
+    database_servers:
+      children:
+        clickhouse_servers:
+
+    monitoring_servers:
+      children:
+        vector_servers:
+        lighthouse_servers:
+
+    logging_stack:
+      children:
+        clickhouse_servers:
+        vector_servers:
+
+  vars:
+    ansible_ssh_common_args: '-o StrictHostKeyChecking=no'

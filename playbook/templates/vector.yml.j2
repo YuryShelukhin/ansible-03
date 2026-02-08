@@ -1,0 +1,51 @@
+sources:
+  nginx_logs:
+    type: file
+    include:
+      - /var/log/nginx/access.log
+      - /var/log/nginx/error.log
+    read_from: beginning
+  
+  syslog:
+    type: syslog
+    mode: tcp
+    address: 0.0.0.0:514
+  
+  application_logs:
+    type: file
+    include:
+      - /var/log/myapp/*.log
+    read_from: beginning
+
+transforms:
+  parse_nginx:
+    type: remap
+    inputs:
+      - nginx_logs
+    source: |
+      # Пример парсинга access логов nginx
+      if source == "/var/log/nginx/access.log" {
+        parsed, err = parse_apache_log(.message, "combined")
+        if err == null {
+          . = merge(., parsed)
+        }
+      }
+
+sinks:
+  clickhouse_sink:
+    type: clickhouse
+    inputs:
+      - parse_nginx
+      - syslog
+      - application_logs
+    database: logs
+    table: vector_logs
+    endpoint: http://{{ clickhouse_host }}:{{ clickhouse_port }}
+    compression: gzip
+    
+  debug_sink:
+    type: console
+    inputs:
+      - parse_nginx
+    encoding:
+      codec: json
