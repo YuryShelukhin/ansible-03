@@ -187,21 +187,17 @@ Failed: 30 failure(s), 0 warning(s) in 1 files processed of 1 encountered. Last 
 9.  Подготовьте README.md-файл по своему playbook. В нём должно быть описано: что делает playbook, какие у него есть параметры и теги.
 
 # 
-Описние плейбука:
+Описание плейбука:
 
 Состоит из 4 частей:
-1. Prepare all hosts — подготовка всех хостов
-Тег: prepare
-Назначение: Базовая настройка всех узлов инфраструктуры
-2. Install ClickHouse — установка ClickHouse
-Тег: clickhouse
-Назначение: Установка и настройка ClickHouse сервера
-3. Install and configure Vector — установка Vector
-Тег: vector
-Назначение: Установка и настройка Vector для сбора логов
-4. Install and configure LightHouse — установка Lighthouse
-Тег: lighthouse
-Назначение: Развёртывание веб-интерфейса для визуализации логов.
+1. Prepare all hosts — подготовка всех хостов.
+Тег: prepare. Назначение: Базовая настройка всех узлов инфраструктуры.
+2. Install ClickHouse — установка ClickHouse.
+Тег: clickhouse. Назначение: Установка и настройка ClickHouse сервера
+3. Install and configure Vector — установка Vector.
+Тег: vector. Назначение: Установка и настройка Vector для сбора логов.
+4. Install and configure LightHouse — установка Lighthouse.
+Тег: lighthouse. Назначение: Развёртывание веб-интерфейса для визуализации логов.
 
 Задачи (tasks):
 
