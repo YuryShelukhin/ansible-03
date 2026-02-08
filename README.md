@@ -201,28 +201,28 @@ Failed: 30 failure(s), 0 warning(s) in 1 files processed of 1 encountered. Last 
 
 Задачи (tasks):
 
-1. Prepare all hosts — подготовка всех хосто
+1. Prepare all hosts — подготовка всех хостов:
 - Обновление кэша пакетов APT
 - Установка базовых утилит (python3, curl, wget, unzip)
 - Ожидание завершения cloud-init
 - Создание пользователя ansible с правами sudo
 - Настройка SSH-доступа для пользователя ansible
   
-2. Install ClickHouse — установка ClickHouse
+2. Install ClickHouse — установка ClickHouse:
 - Добавление GPG-ключа и репозитория ClickHouse
 - Установка пакетов (clickhouse-server, clickhouse-client)
 - Создание базы данных 'logs'
 - Настройка прослушивания на всех интерфейсах (0.0.0.0)
 - Перезапуск службы после изменений конфигурации
   
-3. Install and configure Vector — установка Vector
+3. Install and configure Vector — установка Vector:
 - Установка Vector из официального репозитория
 - Создание структуры каталогов для конфигурации
 - Развёртывание конфигурационного шаблона vector.yml.j2
 - Автоматическое определение типа инициализации (systemd/контейнер)
 - Запуск и включение службы Vector
 
-4. Install and configure LightHouse — установка Lighthouse
+4. Install and configure LightHouse — установка Lighthouse:
 - Установка и настройка nginx
 - Загрузка файлов Lighthouse с GitHub
 - Настройка статического веб-сервера
@@ -247,9 +247,5 @@ Playbook использует хосты из inventory:
 
 Изначально мною была выбрана неправильная идея часть настройки хостов отдать в provisioner-exec, но cтолкнулся с зависанием установки SSH, поэтому все конфигурирование переместил в плейбук.
 
-
-### Как оформить решение задания
-
-Выполненное домашнее задание пришлите в виде ссылки на .md-файл в вашем репозитории.
 
 ---
